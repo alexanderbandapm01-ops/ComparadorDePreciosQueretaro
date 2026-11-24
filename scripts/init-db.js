@@ -1,7 +1,8 @@
 'use strict';
 /**
  * Crea la base de datos comparador_precios_sostenible desde database/schema.sql
- * y carga los catálogos base (unidades, municipios de Querétaro, transportes).
+ * (equivale a ejecutar el script en Workbench). No inserta datos: después se
+ * cargan los CSV limpios con 02_cargar.py.
  *
  *   npm run db:init            → crea la base (se niega si ya tiene precios)
  *   npm run db:init -- --force → la borra y la vuelve a crear
@@ -9,7 +10,6 @@
 const fs = require('fs');
 const path = require('path');
 const { conectar, config } = require('../src/db');
-const { sembrarBase } = require('./lib/dimensiones');
 
 (async () => {
   const force = process.argv.includes('--force');
@@ -32,10 +32,8 @@ const { sembrarBase } = require('./lib/dimensiones');
     let sql = fs.readFileSync(path.join(__dirname, '..', 'database', 'schema.sql'), 'utf8');
     sql = sql.replace(/comparador_precios_sostenible/g, config.database);
     await conn.query(sql);
-    await conn.changeUser({ database: config.database });
-    await sembrarBase(conn);
-    console.log(`✅ Base de datos "${config.database}" creada en ${config.host}:${config.port} con catálogos de Querétaro.`);
-    console.log('   Siguiente paso: npm run importar -- ruta/al/archivo_qqp.csv   (o npm run db:demo para datos de prueba)');
+    console.log(`✅ Base de datos "${config.database}" creada (vacía) en ${config.host}:${config.port}.`);
+    console.log('   Siguiente paso: python 01_limpiar.py  y  python 02_cargar.py  (ver README)');
   } finally {
     await conn.end();
   }

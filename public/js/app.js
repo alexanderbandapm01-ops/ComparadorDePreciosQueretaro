@@ -24,13 +24,13 @@
     unaTienda: '🏪 Todo en una tienda',
     minimo: '📉 Cada producto a su mínimo',
   };
-  const CANASTA_TIPICA = ['leche', 'huevo', 'tortilla', 'frijol', 'arroz', 'jitomate', 'pollo', 'aceite', 'azucar', 'papel'];
 
   // ---------------------------------------------------------------- estado
   const guardado = (() => { try { return JSON.parse(localStorage.getItem('cdps') || '{}'); } catch { return {}; } })();
   const st = {
     info: null,
-    ubicacion: guardado.ubicacion || { lat: 20.5888, lon: -100.3899, etiqueta: 'Centro de Querétaro' },
+    ubicacion: guardado.ubicacion || null,
+    catalogo: guardado.catalogo || '',
     transporte: guardado.transporte || null,
     radio: guardado.radio || 8,
     canasta: guardado.canasta || [],
@@ -44,8 +44,8 @@
     sucursales: [],
   };
   function persistir() {
-    const { ubicacion, transporte, radio, canasta, preset, valorTiempo, pesoEco, maxTiendas, sesion } = st;
-    try { localStorage.setItem('cdps', JSON.stringify({ ubicacion, transporte, radio, canasta, preset, valorTiempo, pesoEco, maxTiendas, sesion })); } catch { /* modo privado */ }
+    const { ubicacion, catalogo, transporte, radio, canasta, preset, valorTiempo, pesoEco, maxTiendas, sesion } = st;
+    try { localStorage.setItem('cdps', JSON.stringify({ ubicacion, catalogo, transporte, radio, canasta, preset, valorTiempo, pesoEco, maxTiendas, sesion })); } catch { /* modo privado */ }
   }
 
   async function api(ruta, opciones = {}) {
@@ -72,7 +72,8 @@
   }
 
   // ---------------------------------------------------------------- mapa
-  const mapa = L.map('mapa', { zoomControl: true, scrollWheelZoom: false }).setView([st.ubicacion.lat, st.ubicacion.lon], 12);
+  const INICIO = st.ubicacion || { lat: 20.5888, lon: -100.3899 };
+  const mapa = L.map('mapa', { zoomControl: true, scrollWheelZoom: false }).setView([INICIO.lat, INICIO.lon], 12);
   L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
     attribution: '&copy; OpenStreetMap &copy; CARTO',
     maxZoom: 19,
@@ -83,8 +84,8 @@
   const capaTiendas = L.layerGroup().addTo(mapa);
   const capaRuta = L.layerGroup().addTo(mapa);
   const iconoYo = L.divIcon({ className: '', html: '<div style="width:22px;height:22px;border-radius:50%;background:#3b6ea8;border:4px solid #fff;box-shadow:0 0 0 6px rgba(59,110,168,.25),0 2px 6px rgba(0,0,0,.3)"></div>', iconSize: [22, 22], iconAnchor: [11, 11] });
-  const marcadorYo = L.marker([st.ubicacion.lat, st.ubicacion.lon], { draggable: true, icon: iconoYo, zIndexOffset: 1000, title: 'Tú' }).addTo(mapa);
-  const circulo = L.circle([st.ubicacion.lat, st.ubicacion.lon], { radius: st.radio * 1000 / 1.35, color: '#5a9e62', weight: 1, fillOpacity: 0.06, interactive: false }).addTo(mapa);
+  const marcadorYo = L.marker([INICIO.lat, INICIO.lon], { draggable: true, icon: iconoYo, zIndexOffset: 1000, title: 'Tú' }).addTo(mapa);
+  const circulo = L.circle([INICIO.lat, INICIO.lon], { radius: st.radio * 1000 / 1.35, color: '#5a9e62', weight: 1, fillOpacity: 0.06, interactive: false }).addTo(mapa);
 
   marcadorYo.on('dragend', () => {
     const p = marcadorYo.getLatLng();
@@ -124,12 +125,12 @@
   function pintarTransportes() {
     const cont = $('#transportes');
     cont.innerHTML = st.info.transportes
-      .map((t) => `<button type="button" class="chip" role="radio" data-id="${t.id}" aria-checked="${t.id === st.transporte}">${t.icono || '🚗'} ${esc(t.nombre)}</button>`)
+      .map((t) => `<button type="button" class="chip" role="radio" data-clave="${t.clave}" aria-checked="${t.clave === st.transporte}">${t.icono || '🚗'} ${esc(t.nombre)}</button>`)
       .join('');
     cont.onclick = (e) => {
       const b = e.target.closest('.chip');
       if (!b) return;
-      st.transporte = Number(b.dataset.id);
+      st.transporte = b.dataset.clave;
       $$('.chip', cont).forEach((x) => x.setAttribute('aria-checked', x === b));
       persistir();
       invalidarResultado();
@@ -154,7 +155,7 @@
   };
 
   $('#selMunicipio').onchange = (e) => {
-    const m = st.info.municipios.find((x) => x.nombre === e.target.value);
+    const m = st.info.municipios[Number(e.target.value)];
     if (m) fijarUbicacion(m.lat, m.lon, m.nombre, true);
   };
 
@@ -179,7 +180,7 @@
     const lista = await api('/api/buscar?' + qs);
     if (id !== ultimaBusqueda) return;
     if (!lista.length) {
-      cajaRes.innerHTML = `<p class="vacio">No encontré productos con precio en Querétaro para “${esc(params.q || params.clave)}”.</p>`;
+      cajaRes.innerHTML = `<p class="vacio">No encontré productos con precio en la zona para “${esc(params.q || params.categoria)}”${params.catalogo ? ` en el catálogo ${esc(params.catalogo)}` : ''}.</p>`;
     } else {
       cajaRes.innerHTML = lista
         .map(
@@ -200,7 +201,7 @@
     const q = e.target.value.trim();
     $$('.cat').forEach((c) => c.classList.remove('activa'));
     if (q.length < 2) { cajaRes.hidden = true; return; }
-    tBusqueda = setTimeout(() => buscar({ q }).catch((er) => toast(er.message)), 180);
+    tBusqueda = setTimeout(() => buscar(conCatalogo({ q })).catch((er) => toast(er.message)), 180);
   });
   $('#txtBuscar').addEventListener('keydown', (e) => {
     if (e.key === 'Escape') cajaRes.hidden = true;
@@ -216,8 +217,8 @@
   });
 
   function pintarCategorias() {
-    $('#categorias').innerHTML = st.info.canasta
-      .map((c) => `<button type="button" class="cat" data-clave="${c.clave}" ${c.opciones ? '' : 'disabled title="Sin precios en los datos actuales"'}><span>${c.emoji}</span>${esc(c.nombre)}</button>`)
+    $('#categorias').innerHTML = st.info.categorias
+      .map((c) => `<button type="button" class="cat" data-cat="${esc(c.nombre)}" title="${c.opciones} presentaciones"><span>${c.icono}</span>${esc(c.nombre)}</button>`)
       .join('');
     $('#categorias').onclick = (e) => {
       const b = e.target.closest('.cat');
@@ -227,7 +228,7 @@
       if (activa) { cajaRes.hidden = true; return; }
       b.classList.add('activa');
       $('#txtBuscar').value = '';
-      buscar({ clave: b.dataset.clave }).catch((er) => toast(er.message));
+      buscar(conCatalogo({ categoria: b.dataset.cat })).catch((er) => toast(er.message));
     };
   }
 
@@ -286,17 +287,36 @@
   });
 
   $('#btnRapida').onclick = async () => {
-    const claves = CANASTA_TIPICA.filter((c) => st.info.canasta.find((x) => x.clave === c && x.opciones));
-    let n = 0;
-    for (const clave of claves) {
-      const lista = await api('/api/buscar?clave=' + clave);
-      if (!lista.length || st.canasta.some((x) => lista.some((p) => p.id === x.id_presentacion))) continue;
-      const mejor = lista.slice().sort((a, b) => b.tiendas - a.tiendas || a.min - b.min)[0];
-      agregar(mejor, true, true);
-      n++;
-    }
-    toast(n ? `Agregué ${n} productos típicos (con “cualquier marca”)` : 'Ya tienes la canasta típica');
+    try {
+      const r = await api('/api/sugerida');
+      let n = 0;
+      for (const p of r.productos) {
+        if (st.canasta.some((x) => x.id_presentacion === p.id)) continue;
+        agregar(p, true, true);
+        n++;
+      }
+      toast(n ? `Agregué ${n} productos (${r.fuente}) con “cualquier marca”` : 'Ya tienes esos productos');
+    } catch (e) { toast(e.message); }
   };
+
+  // Filtro por catálogo de QQP (Pacic, Basicos, Mercados…)
+  const conCatalogo = (params) => (st.catalogo ? { ...params, catalogo: st.catalogo } : params);
+  function pintarCatalogos() {
+    const cont = $('#catalogos');
+    const lista = [{ nombre: '', opciones: st.info.presentaciones }, ...st.info.catalogos];
+    cont.innerHTML = lista
+      .map((c) => `<button type="button" class="chip" role="radio" data-cat="${esc(c.nombre)}" aria-checked="${c.nombre === st.catalogo}">${c.nombre ? esc(c.nombre) : 'Todos'} <small>${c.opciones}</small></button>`)
+      .join('');
+    cont.onclick = (e) => {
+      const b = e.target.closest('.chip');
+      if (!b) return;
+      st.catalogo = b.dataset.cat;
+      $$('.chip', cont).forEach((x) => x.setAttribute('aria-checked', x === b));
+      persistir();
+      cajaRes.hidden = true;
+      $$('.cat').forEach((c) => c.classList.remove('activa'));
+    };
+  }
 
   // ---------------------------------------------------------------- paso 3
   function pintarPreferencias() {
@@ -386,7 +406,7 @@
         <span>${r.transporte.icono || ''} ${esc(r.transporte.nombre)}</span>
         <span>🏪 ${r.sucursalesEnRadio} tiendas a ≤ ${r.radioKm} km</span>
         <span>🧺 ${r.items.length} productos</span>
-        <span>📅 precios al ${esc(r.datos.fechaMax || '—')}${r.datos.demo ? ' (demo)' : ''}</span>
+        <span>📅 precios al ${esc(r.datos.fechaMax || '—')}</span>
       </div>
       <div class="planes" role="list">${r.planes.map((p, i) => tarjetaPlan(p, i)).join('')}</div>
       <div id="detallePlan"></div>
@@ -433,7 +453,8 @@
       frases.push(`La más rápida te ahorra <b>${minutos(p.minutos - rapido.minutos)}</b>${rapido.costoTotal > p.costoTotal ? ` y cuesta <b>${pesos(rapido.costoTotal - p.costoTotal)}</b> más` : ''}.`);
     }
     if (p.costoTransporte > 0) frases.push(`Incluye ~${pesos(p.costoTransporte)} de transporte.`);
-    if (p.co2Total > 0) frases.push(`Huella estimada de la canasta: <b>${kg(p.co2Total)} CO₂e</b> (${kg(p.co2Productos)} por los productos, ${kg(p.co2Transporte)} por el viaje).`);
+    if (st.resultado.datos.conFactores && p.co2Productos > 0) frases.push(`Huella estimada de la canasta: <b>${kg(p.co2Total)} CO₂e</b> (${kg(p.co2Productos)} por los productos, ${kg(p.co2Transporte)} por el viaje).`);
+    else if (p.co2Transporte > 0) frases.push(`El viaje emite ~<b>${kg(p.co2Transporte)} CO₂e</b> (la base aún no tiene factores de emisión de los productos).`);
     return frases.join(' ');
   }
 
@@ -529,7 +550,7 @@
   }
 
   function formularioCuenta(modo = 'login', despues) {
-    const muni = st.info.municipios.map((m) => `<option>${esc(m.nombre)}</option>`).join('');
+    const muni = [...new Set(st.info.municipios.map((m) => m.nombre))].map((n) => `<option>${esc(n)}</option>`).join('');
     abrirModal(`
       <h3>${modo === 'login' ? 'Entra a tu cuenta' : 'Crea tu cuenta'}</h3>
       <p class="pista">Guarda tus listas de compra y recomendaciones en la base de datos.</p>
@@ -630,7 +651,7 @@
             ...f,
             lat: st.ubicacion.lat,
             lon: st.ubicacion.lon,
-            transporte: r.transporte.id,
+            transporte: r.transporte.clave,
             sucursales: p.tiendas.map((t) => t.id),
             items: r.items.map((it) => {
               const a = p.asignacion[it.key];
@@ -664,19 +685,25 @@
       return;
     }
     const i = st.info;
-    if (i.demo) aviso('🧪 Estás viendo <b>datos de demostración</b> (precios sintéticos). Importa el CSV real de QQP con <code>npm run importar -- archivo.csv</code>.');
-    if (!i.presentaciones) aviso('La base de datos no tiene precios todavía. Ejecuta <code>npm run importar -- archivo.csv</code> o <code>npm run db:demo</code>.', 'error');
-    const f = i.fuentes[0];
-    $('#txtDatos').textContent = f ? `Datos: ${f.nombre_archivo} · periodo ${f.periodo || '—'} · ${i.sucursales} tiendas y ${i.presentaciones} productos en Querétaro.` : '';
+    if (!i.presentaciones) {
+      aviso(`No hay precios de la zona en la base (${i.sucursalesTotales} sucursales cargadas en total). Carga los CSV limpios con <code>python 02_cargar.py</code> y recarga la página.`, 'error');
+    }
+    if (!i.conFactores) aviso('ℹ️ La tabla <code>factor_emision_producto</code> está vacía: la huella solo considera el traslado. Llena <code>kgco2e_por_kg</code> en <code>mapeo_huella.csv</code> para incluir los productos.');
+    const periodos = i.fuentes.map((f) => f.periodo || f.nombre_archivo).join(', ');
+    $('#txtDatos').textContent = `Datos QQP (${periodos || 'sin fuentes'}) · ${i.sucursales} tiendas y ${i.presentaciones} presentaciones en la zona · precio más reciente ${i.fechaMax || '—'}.`;
 
-    $('#selMunicipio').innerHTML = '<option value="">Elegir municipio…</option>' + i.municipios.map((m) => `<option>${esc(m.nombre)}</option>`).join('');
-    if (!i.transportes.some((t) => t.id === st.transporte)) st.transporte = (i.transportes.find((t) => /auto/i.test(t.nombre)) || i.transportes[0] || {}).id;
+    $('#selMunicipio').innerHTML = '<option value="">Elegir municipio…</option>' + i.municipios.map((m, k) => `<option value="${k}">${esc(m.nombre)} (${m.sucursales} tiendas)</option>`).join('');
+    if (!st.ubicacion && i.municipios[0]) st.ubicacion = { lat: i.municipios[0].lat, lon: i.municipios[0].lon, etiqueta: i.municipios[0].nombre };
+    if (!st.ubicacion) st.ubicacion = { lat: 20.5888, lon: -100.3899, etiqueta: 'Querétaro' };
+    if (!i.transportes.some((t) => t.clave === st.transporte)) st.transporte = 'auto';
+    if (st.catalogo && !i.catalogos.some((c) => c.nombre === st.catalogo)) st.catalogo = '';
+    pintarCatalogos();
     pintarTransportes();
     pintarCategorias();
     pintarCanasta();
     pintarPreferencias();
     pintarCuenta();
-    fijarUbicacion(st.ubicacion.lat, st.ubicacion.lon, st.ubicacion.etiqueta);
+    fijarUbicacion(st.ubicacion.lat, st.ubicacion.lon, st.ubicacion.etiqueta, true);
     st.resultado = null;
     $('#btnBuscar span').textContent = 'Encontrar dónde comprar';
 

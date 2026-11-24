@@ -8,8 +8,6 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "db:init": "node scripts/init-db.js",
-    "db:demo": "node scripts/demo-data.js",
-    "importar": "node scripts/importar-qqp.js",
     "test": "node --test \"test/*.test.js\""
   },
   "engines": {

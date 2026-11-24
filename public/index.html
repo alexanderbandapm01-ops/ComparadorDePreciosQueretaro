@@ -54,12 +54,15 @@
       <!-- Paso 2 -->
       <article class="paso" id="paso2">
         <header><span class="num">2</span><h2>Arma tu canasta</h2>
-          <button class="btn-link" id="btnRapida" type="button">⚡ Canasta típica</button>
+          <button class="btn-link" id="btnRapida" type="button" title="Productos del catálogo PACIC más disponibles en la zona">⚡ Canasta PACIC</button>
         </header>
         <div class="buscador">
-          <input type="search" id="txtBuscar" placeholder="Busca: leche, huevo, tortilla, arroz…" autocomplete="off" aria-label="Buscar producto">
+          <input type="search" id="txtBuscar" placeholder="Busca: leche, huevo, tortilla, frijol…" autocomplete="off" aria-label="Buscar producto">
           <div class="resultados" id="resultados" hidden></div>
         </div>
+        <label class="etiqueta">Catálogo de PROFECO</label>
+        <div class="chips chips-mini" id="catalogos" role="radiogroup" aria-label="Catálogo"></div>
+        <label class="etiqueta">Categorías</label>
         <div class="categorias" id="categorias"></div>
 
         <ul class="canasta" id="canasta" aria-live="polite"></ul>
@@ -114,7 +117,7 @@
   </main>
 
   <footer class="pie">
-    <p>Datos: <a href="https://www.gob.mx/profeco" target="_blank" rel="noopener">Quién es Quién en los Precios · PROFECO</a>. Huella de productos: Poore &amp; Nemecek (2018). Tiempos y distancias son estimaciones.</p>
+    <p>Datos: <a href="https://www.gob.mx/profeco" target="_blank" rel="noopener">Quién es Quién en los Precios · PROFECO</a>. Huella de productos: tabla factor_emision_producto. Tiempos y distancias son estimaciones.</p>
   </footer>
 
   <!-- Modal genérico -->

@@ -194,7 +194,7 @@ input[type=range] { width: 100%; accent-color: var(--verde); }
 .btn-primario.cargando span::after { content: ' …'; }
 
 /* ---------- Mapa ---------- */
-.mapa-caja { position: relative; border-radius: var(--radio); overflow: hidden; box-shadow: var(--sombra); border: 1px solid var(--borde); background: #dfe7dc; }
+.mapa-caja { isolation: isolate; position: relative; border-radius: var(--radio); overflow: hidden; box-shadow: var(--sombra); border: 1px solid var(--borde); background: #dfe7dc; }
 #mapa { height: clamp(260px, 42vh, 460px); }
 .leyenda {
   position: absolute; left: 10px; bottom: 10px; z-index: 500; display: flex; gap: 10px;
@@ -326,3 +326,8 @@ dialog::backdrop { background: rgba(16, 36, 26, .45); }
   .btn-primario { flex-direction: column; justify-content: center; gap: 0; padding: 10px 16px; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; scroll-behavior: auto !important; } }
+
+.chips-mini .chip { min-height: 32px; padding: 4px 10px; font-size: 12.5px; }
+.chips-mini .chip small { opacity: .7; font-size: 11px; }
+.categorias { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); max-height: 330px; overflow: auto; padding-right: 2px; }
+.cat { font-size: 11px; }

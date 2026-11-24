@@ -6,41 +6,21 @@ const BBOX_ESTADO = { latMin: 20.0, latMax: 21.7, lonMin: -100.65, lonMax: -99.0
 // Zona metropolitana: Querétaro, Corregidora, El Marqués y Huimilpan (norte)
 const BBOX_METRO = { latMin: 20.45, latMax: 20.82, lonMin: -100.56, lonMax: -100.2 };
 
-// Cabeceras municipales (aprox.), para centrar el mapa si no hay GPS
-const MUNICIPIOS_QRO = [
-  { nombre: 'Querétaro', lat: 20.5888, lon: -100.3899 },
-  { nombre: 'Corregidora', lat: 20.5394, lon: -100.4413 },
-  { nombre: 'El Marqués', lat: 20.6047, lon: -100.3297 },
-  { nombre: 'San Juan del Río', lat: 20.3889, lon: -99.9961 },
-  { nombre: 'Tequisquiapan', lat: 20.5206, lon: -99.8917 },
-  { nombre: 'Pedro Escobedo', lat: 20.5019, lon: -100.1408 },
-  { nombre: 'Huimilpan', lat: 20.3725, lon: -100.275 },
-  { nombre: 'Colón', lat: 20.7853, lon: -100.0469 },
-  { nombre: 'Ezequiel Montes', lat: 20.665, lon: -99.8994 },
-  { nombre: 'Cadereyta de Montes', lat: 20.6936, lon: -99.815 },
-  { nombre: 'Amealco de Bonfil', lat: 20.1881, lon: -100.1439 },
-  { nombre: 'Tolimán', lat: 20.9097, lon: -99.9311 },
-  { nombre: 'Peñamiller', lat: 21.0533, lon: -99.815 },
-  { nombre: 'San Joaquín', lat: 20.9156, lon: -99.5653 },
-  { nombre: 'Pinal de Amoles', lat: 21.1356, lon: -99.6261 },
-  { nombre: 'Jalpan de Serra', lat: 21.2167, lon: -99.4733 },
-  { nombre: 'Landa de Matamoros', lat: 21.1842, lon: -99.3203 },
-  { nombre: 'Arroyo Seco', lat: 21.5467, lon: -99.6889 },
-];
-
 /**
- * Parámetros de cada medio de transporte. El nombre coincide con la tabla
- * medio_transporte; el factor de emisión (kg CO2e por km) vive en la BD.
+ * Parámetros de cada medio de transporte (supuestos del modelo, no datos de QQP).
+ * Si la tabla medio_transporte tiene un registro con el mismo nombre, su
+ * factor_emision_kgco2_km reemplaza al de aquí. Al guardar una lista, el medio
+ * usado se registra en medio_transporte para poder llenar distancia_usuario_sucursal.
  * velocidad: km/h promedio urbano · espera: min por trayecto
  * costoKm: $/km · costoTrayecto: $ fijo por cada trayecto (pasaje, banderazo)
  */
 const TRANSPORTES = [
-  { nombre: 'Caminando', icono: '🚶', factor: 0, velocidad: 4.5, espera: 0, costoKm: 0, costoTrayecto: 0 },
-  { nombre: 'Bicicleta', icono: '🚲', factor: 0, velocidad: 14, espera: 0, costoKm: 0, costoTrayecto: 0 },
-  { nombre: 'Transporte público', icono: '🚌', factor: 0.089, velocidad: 16, espera: 10, costoKm: 0, costoTrayecto: 11 },
-  { nombre: 'Motocicleta', icono: '🏍️', factor: 0.103, velocidad: 28, espera: 0, costoKm: 1.1, costoTrayecto: 0 },
-  { nombre: 'Automóvil', icono: '🚗', factor: 0.192, velocidad: 25, espera: 3, costoKm: 2.6, costoTrayecto: 0 },
-  { nombre: 'Taxi / app', icono: '🚕', factor: 0.192, velocidad: 25, espera: 6, costoKm: 8.5, costoTrayecto: 35 },
+  { clave: 'caminando', nombre: 'Caminando', icono: '🚶', factor: 0, velocidad: 4.5, espera: 0, costoKm: 0, costoTrayecto: 0 },
+  { clave: 'bicicleta', nombre: 'Bicicleta', icono: '🚲', factor: 0, velocidad: 14, espera: 0, costoKm: 0, costoTrayecto: 0 },
+  { clave: 'publico', nombre: 'Transporte público', icono: '🚌', factor: 0.089, velocidad: 16, espera: 10, costoKm: 0, costoTrayecto: 11 },
+  { clave: 'moto', nombre: 'Motocicleta', icono: '🏍️', factor: 0.103, velocidad: 28, espera: 0, costoKm: 1.1, costoTrayecto: 0 },
+  { clave: 'auto', nombre: 'Automóvil', icono: '🚗', factor: 0.192, velocidad: 25, espera: 3, costoKm: 2.6, costoTrayecto: 0 },
+  { clave: 'taxi', nombre: 'Taxi / app', icono: '🚕', factor: 0.192, velocidad: 25, espera: 6, costoKm: 8.5, costoTrayecto: 35 },
 ];
 
 // Las calles no son líneas rectas: distancia real ≈ distancia en línea recta × 1.35
@@ -63,4 +43,4 @@ function dentroDe(bbox, lat, lon) {
   return lat >= bbox.latMin && lat <= bbox.latMax && lon >= bbox.lonMin && lon <= bbox.lonMax;
 }
 
-module.exports = { BBOX_ESTADO, BBOX_METRO, MUNICIPIOS_QRO, TRANSPORTES, FACTOR_RODEO, haversineKm, kmCalle, dentroDe };
+module.exports = { BBOX_ESTADO, BBOX_METRO, TRANSPORTES, FACTOR_RODEO, haversineKm, kmCalle, dentroDe };

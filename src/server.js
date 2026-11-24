@@ -9,12 +9,14 @@ const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
 const { getPool, config } = require('./db');
-const { CANASTA, clasificar, normalizar, kgProducto, cantidadBase, unidadBase } = require('./canasta');
-const { TRANSPORTES, MUNICIPIOS_QRO, kmCalle } = require('./geo');
+const { normalizar, iconoCategoria, kgProducto, cantidadBase, unidadBase } = require('./canasta');
+const { TRANSPORTES, BBOX_ESTADO, BBOX_METRO, dentroDe, kmCalle } = require('./geo');
 const { recomendar } = require('./recomendador');
 
 const PORT = Number(process.env.PORT || 3000);
 const VENTANA_DIAS = Number(process.env.VENTANA_DIAS || 120); // antigüedad máxima de un precio para usarlo
+// Zona de trabajo: queretaro (estado), metro (zona metropolitana) o todo (todo el país)
+const ZONA = (process.env.ZONA || 'queretaro').toLowerCase();
 const SECRETO = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 const db = getPool();
 
@@ -28,61 +30,104 @@ app.use('/vendor/leaflet', express.static(path.join(path.dirname(require.resolve
 // Cachés (los datos de QQP cambian poco; se recargan cada 5 minutos)
 // ---------------------------------------------------------------------------
 let cache = { hasta: 0 };
+
+function enZona(s) {
+  if (!Number.isFinite(s.lat) || !Number.isFinite(s.lon)) return false;
+  if (ZONA === 'todo') return true;
+  const bbox = ZONA === 'metro' ? BBOX_METRO : BBOX_ESTADO;
+  return dentroDe(bbox, s.lat, s.lon) && normalizar(s.estado).includes('QUERETARO');
+}
+
 async function datos() {
   if (Date.now() < cache.hasta) return cache;
-  const [[{ fechaMax }]] = await db.query('SELECT MAX(fecha_registro) fechaMax FROM registro_precio');
-  const desde = fechaMax
-    ? new Date(new Date(fechaMax + 'T00:00:00Z').getTime() - VENTANA_DIAS * 864e5).toISOString().slice(0, 10)
-    : '1900-01-01';
 
-  const [sucursales] = await db.query(
-    `SELECT s.id_sucursal id, s.nombre_comercial nombre, c.nombre cadena, g.nombre giro, mu.nombre municipio,
+  // Sucursales cargadas por la ETL; el filtro a Querétaro se hace aquí, sin tocar la base
+  const [todas] = await db.query(
+    `SELECT s.id_sucursal id, s.nombre_comercial nombre, c.nombre cadena, g.nombre giro, mu.nombre municipio, e.nombre estado,
             s.calle, s.colonia, s.codigo_postal cp, ST_Latitude(s.ubicacion) lat, ST_Longitude(s.ubicacion) lon
        FROM sucursal s
        JOIN cadena_comercial c ON c.id_cadena = s.id_cadena
        JOIN giro g ON g.id_giro = s.id_giro
        JOIN municipio mu ON mu.id_municipio = s.id_municipio
-      WHERE EXISTS (SELECT 1 FROM registro_precio r WHERE r.id_sucursal = s.id_sucursal AND r.fecha_registro >= ?)`,
-    [desde]
+       JOIN estado e ON e.id_estado = mu.id_estado`
   );
+  const enArea = todas.filter(enZona);
+  const ids = enArea.map((s) => s.id);
 
-  const [pres] = await db.query(
-    `SELECT p.id_presentacion id, pr.nombre producto, m.nombre marca, ca.nombre categoria, p.descripcion_original descripcion,
-            p.cantidad, u.abreviatura unidad, f.kgco2_por_unidad kgco2,
-            MIN(r.precio) min, MAX(r.precio) max, AVG(r.precio) promedio, COUNT(DISTINCT r.id_sucursal) tiendas
-       FROM presentacion p
-       JOIN producto pr ON pr.id_producto = p.id_producto
-       JOIN marca m ON m.id_marca = pr.id_marca
-       JOIN categoria ca ON ca.id_categoria = pr.id_categoria
-       JOIN unidad_medida u ON u.id_unidad = p.id_unidad
-       JOIN registro_precio r ON r.id_presentacion = p.id_presentacion AND r.fecha_registro >= ?
-       LEFT JOIN factor_emision_producto f ON f.id_producto = pr.id_producto
-      GROUP BY p.id_presentacion, pr.nombre, m.nombre, ca.nombre, p.descripcion_original, p.cantidad, u.abreviatura, f.kgco2_por_unidad`,
-    [desde]
-  );
+  let fechaMax = null;
+  let desde = '1900-01-01';
+  let pres = [];
+  let conPrecio = new Set();
+  if (ids.length) {
+    [[{ fechaMax }]] = await db.query('SELECT MAX(fecha_registro) fechaMax FROM registro_precio WHERE id_sucursal IN (?)', [ids]);
+    if (fechaMax) desde = new Date(new Date(fechaMax + 'T00:00:00Z').getTime() - VENTANA_DIAS * 864e5).toISOString().slice(0, 10);
+    [pres] = await db.query(
+      `SELECT p.id_presentacion id, pr.nombre producto, m.nombre marca, ca.nombre categoria, p.descripcion_original descripcion,
+              p.cantidad, u.abreviatura unidad, x.min, x.max, x.promedio, x.tiendas,
+              (SELECT AVG(f.kgco2_por_unidad) FROM factor_emision_producto f WHERE f.id_producto = pr.id_producto) kgco2,
+              (SELECT GROUP_CONCAT(DISTINCT cg.nombre ORDER BY cg.nombre SEPARATOR '|')
+                 FROM presentacion_catalogo pc JOIN catalogo cg ON cg.id_catalogo = pc.id_catalogo
+                WHERE pc.id_presentacion = p.id_presentacion) catalogos
+         FROM (SELECT id_presentacion, MIN(precio) min, MAX(precio) max, AVG(precio) promedio, COUNT(DISTINCT id_sucursal) tiendas
+                 FROM registro_precio
+                WHERE id_sucursal IN (?) AND fecha_registro >= ?
+                GROUP BY id_presentacion) x
+         JOIN presentacion p ON p.id_presentacion = x.id_presentacion
+         JOIN producto pr ON pr.id_producto = p.id_producto
+         JOIN marca m ON m.id_marca = pr.id_marca
+         JOIN categoria ca ON ca.id_categoria = pr.id_categoria
+         JOIN unidad_medida u ON u.id_unidad = p.id_unidad`,
+      [ids, desde]
+    );
+    const [suc] = await db.query('SELECT DISTINCT id_sucursal FROM registro_precio WHERE id_sucursal IN (?) AND fecha_registro >= ?', [ids, desde]);
+    conPrecio = new Set(suc.map((r) => r.id_sucursal));
+  }
+  const sucursales = enArea.filter((s) => conPrecio.has(s.id));
+
   const presentaciones = pres.map((p) => {
-    const c = clasificar(p.producto);
     const base = cantidadBase(p.cantidad, p.unidad);
-    const kg = kgProducto(p.cantidad, p.unidad, c && c.clave);
-    const factor = p.kgco2 != null ? Number(p.kgco2) : c ? c.kgco2 : null;
+    const kg = kgProducto(p.cantidad, p.unidad);
+    const factor = p.kgco2 != null ? Number(p.kgco2) : null;
+    const catalogos = p.catalogos ? p.catalogos.split('|') : [];
     return {
       ...p,
+      kgco2: undefined,
+      cantidad: p.cantidad != null ? Number(p.cantidad) : null,
       promedio: Math.round(p.promedio * 100) / 100,
-      clave: c ? c.clave : null,
-      emoji: c ? c.emoji : '🛒',
+      catalogos,
+      emoji: iconoCategoria(p.categoria),
       unidadBase: base ? unidadBase(p.unidad) : null,
       precioUnitarioMin: base ? Math.round((p.min / base) * 100) / 100 : null,
       huella: kg != null && factor != null ? Math.round(kg * factor * 1000) / 1000 : null,
-      texto: normalizar(`${p.producto} ${p.marca} ${p.descripcion} ${c ? c.nombre : ''}`),
-      grupo: `${normalizar(p.producto)}|${p.unidad}|${p.cantidad}`,
+      texto: normalizar(`${p.producto} ${p.marca} ${p.descripcion} ${p.categoria}`),
+      // "Cualquier marca": mismo producto, misma unidad y misma cantidad
+      grupo: `${normalizar(p.producto)}|${normalizar(p.unidad)}|${p.cantidad}`,
     };
   });
 
-  const [fuentes] = await db.query('SELECT nombre_archivo, periodo, fecha_carga FROM fuente_datos ORDER BY fecha_carga DESC LIMIT 5');
+  // Municipios con tiendas en la zona; el centro es el promedio de sus sucursales
+  const porMun = new Map();
+  for (const s of sucursales) {
+    const k = s.municipio + '|' + s.estado;
+    const m = porMun.get(k) || { nombre: s.municipio, estado: s.estado, lat: 0, lon: 0, sucursales: 0 };
+    m.lat += s.lat; m.lon += s.lon; m.sucursales++;
+    porMun.set(k, m);
+  }
+  const municipios = [...porMun.values()]
+    .map((m) => ({ ...m, lat: m.lat / m.sucursales, lon: m.lon / m.sucursales }))
+    .sort((a, b) => b.sucursales - a.sucursales);
+
+  const cuenta = (f) => {
+    const m = new Map();
+    for (const p of presentaciones) for (const k of [].concat(f(p))) m.set(k, (m.get(k) || 0) + 1);
+    return [...m.entries()].sort((a, b) => b[1] - a[1]);
+  };
+
+  const [fuentes] = await db.query('SELECT nombre_archivo, periodo, fecha_carga FROM fuente_datos ORDER BY id_fuente');
   const [transDb] = await db.query('SELECT id_transporte id, nombre, factor_emision_kgco2_km factor FROM medio_transporte');
-  const transportes = transDb.map((t) => {
-    const cfg = TRANSPORTES.find((x) => normalizar(x.nombre) === normalizar(t.nombre)) || TRANSPORTES[4];
-    return { ...cfg, id: t.id, nombre: t.nombre, factor: Number(t.factor) };
+  const transportes = TRANSPORTES.map((t) => {
+    const enBd = transDb.find((x) => normalizar(x.nombre) === normalizar(t.nombre));
+    return { ...t, idBd: enBd ? enBd.id : null, factor: enBd ? Number(enBd.factor) : t.factor };
   });
 
   cache = {
@@ -90,12 +135,16 @@ async function datos() {
     fechaMax,
     desde,
     sucursales,
+    sucursalesTotales: todas.length,
     sucPorId: new Map(sucursales.map((s) => [s.id, s])),
     presentaciones,
     presPorId: new Map(presentaciones.map((p) => [p.id, p])),
+    categorias: cuenta((p) => p.categoria).map(([nombre, opciones]) => ({ nombre, icono: iconoCategoria(nombre), opciones })),
+    catalogos: cuenta((p) => p.catalogos).map(([nombre, opciones]) => ({ nombre, opciones })),
+    municipios,
     fuentes,
     transportes,
-    demo: fuentes.some((f) => /^DEMO/.test(f.nombre_archivo)),
+    conFactores: presentaciones.some((p) => p.huella != null),
   };
   return cache;
 }
@@ -141,9 +190,9 @@ const envolver = (fn) => (req, res) =>
 function mensajeError(e) {
   if (e.code === 'ECONNREFUSED') return `No hay conexión con MySQL en ${config.host}:${config.port}. ¿Está encendido?`;
   if (e.code === 'ER_ACCESS_DENIED_ERROR') return 'MySQL rechazó el usuario o contraseña (revisa el archivo .env).';
-  if (e.code === 'ER_BAD_DB_ERROR') return `No existe la base "${config.database}". Ejecuta: npm run db:init`;
+  if (e.code === 'ER_BAD_DB_ERROR') return `No existe la base "${config.database}". Ejecuta el script del esquema y 02_cargar.py`;
   if (e.code === 'ER_BAD_FIELD_ERROR' || e.code === 'ER_GIS_INVALID_DATA' || e.code === 'ER_WRONG_ARGUMENTS')
-    return 'El esquema de la base no coincide (¿versión vieja?). Ejecuta: npm run db:init -- --force';
+    return 'El esquema de la base no coincide con comparador_precios_sostenible_sin_comentarios.sql.';
   return 'Error del servidor: ' + e.message;
 }
 
@@ -154,34 +203,54 @@ app.get('/api/estado', envolver(async (req, res) => {
   const d = await datos();
   res.json({
     ok: true,
-    demo: d.demo,
+    zona: ZONA,
     fechaMax: d.fechaMax,
     desde: d.desde,
     fuentes: d.fuentes,
     sucursales: d.sucursales.length,
+    sucursalesTotales: d.sucursalesTotales,
     presentaciones: d.presentaciones.length,
-    canasta: CANASTA.map((c) => ({
-      clave: c.clave,
-      nombre: c.nombre,
-      emoji: c.emoji,
-      opciones: d.presentaciones.filter((p) => p.clave === c.clave).length,
-    })),
-    transportes: d.transportes.map(({ id, nombre, icono, velocidad }) => ({ id, nombre, icono, velocidad })),
-    municipios: MUNICIPIOS_QRO,
+    categorias: d.categorias,
+    catalogos: d.catalogos,
+    conFactores: d.conFactores,
+    transportes: d.transportes.map(({ clave, nombre, icono }) => ({ clave, nombre, icono })),
+    municipios: d.municipios,
   });
 }));
 
+const publica = ({ texto, grupo, kgco2, ...p }) => p;
+
 app.get('/api/buscar', envolver(async (req, res) => {
   const d = await datos();
-  const q = normalizar(req.query.q || '');
-  const clave = req.query.clave || '';
-  const tokens = q.split(' ').filter(Boolean);
+  const tokens = normalizar(req.query.q || '').split(' ').filter(Boolean);
+  const categoria = normalizar(req.query.categoria || '');
+  const catalogo = normalizar(req.query.catalogo || '');
   const resultados = d.presentaciones
-    .filter((p) => (!clave || p.clave === clave) && tokens.every((t) => p.texto.includes(t)))
-    .sort((a, b) => (a.clave ? 0 : 1) - (b.clave ? 0 : 1) || b.tiendas - a.tiendas || a.min - b.min)
-    .slice(0, 40)
-    .map(({ texto, grupo, kgco2, ...p }) => p);
+    .filter(
+      (p) =>
+        (!categoria || normalizar(p.categoria) === categoria) &&
+        (!catalogo || p.catalogos.some((c) => normalizar(c) === catalogo)) &&
+        tokens.every((t) => p.texto.includes(t))
+    )
+    .sort((a, b) => b.tiendas - a.tiendas || a.min - b.min)
+    .slice(0, 60)
+    .map(publica);
   res.json(resultados);
+}));
+
+// Canasta sugerida: productos del catálogo PACIC (o los más disponibles si no hay PACIC en la zona)
+app.get('/api/sugerida', envolver(async (req, res) => {
+  const d = await datos();
+  const pacic = d.presentaciones.filter((p) => p.catalogos.some((c) => normalizar(c) === 'PACIC'));
+  const base = pacic.length ? pacic : d.presentaciones;
+  const mejorPorProducto = new Map();
+  for (const p of base) {
+    const k = normalizar(p.producto);
+    const m = mejorPorProducto.get(k);
+    if (!m || p.tiendas > m.tiendas || (p.tiendas === m.tiendas && p.min < m.min)) mejorPorProducto.set(k, p);
+  }
+  const lista = [...mejorPorProducto.values()].sort((a, b) => b.tiendas - a.tiendas).slice(0, Number(req.query.n) || 12);
+  res.json({ fuente: pacic.length ? 'Pacic' : 'más disponibles', productos: lista.map(publica) });
 }));
 
 app.get('/api/sucursales', envolver(async (req, res) => {
@@ -206,7 +275,7 @@ app.post('/api/recomendar', envolver(async (req, res) => {
     .filter((it) => d.presPorId.has(it.id_presentacion));
   if (!items.length) return res.status(400).json({ error: 'Agrega al menos un producto a tu canasta.' });
 
-  const transporte = d.transportes.find((t) => t.id === Number(b.transporte)) || d.transportes.find((t) => /auto/i.test(t.nombre)) || d.transportes[0];
+  const transporte = d.transportes.find((t) => t.clave === b.transporte) || d.transportes.find((t) => t.clave === 'auto');
   const radioKm = Math.min(Math.max(Number(b.radioKm) || 8, 0.5), 150);
   const origen = { lat, lon };
 
@@ -280,12 +349,12 @@ app.post('/api/recomendar', envolver(async (req, res) => {
   const kmPorId = new Map(cercanas.map((s) => [s.id, s.km]));
 
   res.json({
-    transporte: { id: transporte.id, nombre: transporte.nombre, icono: transporte.icono },
+    transporte: { clave: transporte.clave, nombre: transporte.nombre, icono: transporte.icono },
     radioKm,
     sucursalesEnRadio: cercanas.length,
     items: items.map((it) => {
       const p = d.presPorId.get(it.id_presentacion);
-      return { key: it.key, id_presentacion: it.id_presentacion, cantidad: it.cantidad, flexible: it.flexible, producto: p.producto, marca: p.marca, descripcion: p.descripcion, emoji: p.emoji };
+      return { key: it.key, id_presentacion: it.id_presentacion, cantidad: it.cantidad, flexible: it.flexible, producto: p.producto, marca: p.marca, descripcion: p.descripcion, categoria: p.categoria, emoji: p.emoji };
     }),
     sucursales: Object.fromEntries(
       [...usadas].map((id) => {
@@ -295,7 +364,7 @@ app.post('/api/recomendar', envolver(async (req, res) => {
     ),
     planes: r.planes,
     comparativa: r.comparativa,
-    datos: { fechaMax: d.fechaMax, demo: d.demo },
+    datos: { fechaMax: d.fechaMax, conFactores: d.conFactores },
   });
 }));
 
@@ -305,7 +374,7 @@ app.post('/api/registro', envolver(async (req, res) => {
   const email = String(b.email || '').trim().toLowerCase();
   if (!b.nombre || !b.apellido_paterno || !b.fecha_nacimiento || !/^\S+@\S+\.\S+$/.test(email) || String(b.contrasena || '').length < 6)
     return res.status(400).json({ error: 'Completa nombre, apellido, fecha de nacimiento, correo y una contraseña de 6+ caracteres.' });
-  const [mun] = await db.query('SELECT id_municipio FROM municipio WHERE nombre = ? LIMIT 1', [b.municipio || 'Querétaro']);
+  const [mun] = await db.query('SELECT id_municipio FROM municipio WHERE nombre = ? ORDER BY id_municipio LIMIT 1', [b.municipio || '']);
   if (!mun.length) return res.status(400).json({ error: 'Municipio no válido.' });
   try {
     const [r] = await db.execute(
@@ -408,8 +477,16 @@ app.post('/api/listas', requiereSesion, envolver(async (req, res) => {
     if (Number.isFinite(lat) && Number.isFinite(lon)) {
       await conn.execute(`UPDATE usuario SET ubicacion = ST_GeomFromText(?, 4326, 'axis-order=long-lat') WHERE id_usuario = ?`, [`POINT(${lon} ${lat})`, req.usuario]);
       const d = await datos();
-      const transporte = Number(b.transporte);
-      if (d.transportes.some((t) => t.id === transporte)) {
+      const t = d.transportes.find((x) => x.clave === b.transporte);
+      if (t) {
+        // El medio de transporte se registra en medio_transporte la primera vez que se usa
+        const [mt] = await conn.execute(
+          `INSERT INTO medio_transporte (nombre, factor_emision_kgco2_km) VALUES (?, ?)
+           ON DUPLICATE KEY UPDATE id_transporte = LAST_INSERT_ID(id_transporte)`,
+          [t.nombre, t.factor]
+        );
+        const transporte = mt.insertId;
+        cache.hasta = 0;
         for (const idSuc of new Set((b.sucursales || []).map(Number))) {
           const s = d.sucPorId.get(idSuc);
           if (!s) continue;
@@ -438,8 +515,8 @@ if (require.main === module) {
     console.log(`🌿 CDPS Sostenible en http://localhost:${PORT}  (MySQL ${config.user}@${config.host}:${config.port}/${config.database})`);
     try {
       const d = await datos();
-      console.log(`   ${d.sucursales.length} sucursales y ${d.presentaciones.length} presentaciones con precio${d.demo ? ' (DATOS DEMO)' : ''}.`);
-      if (!d.presentaciones.length) console.log('   La base no tiene precios: ejecuta npm run importar -- archivo.csv  o  npm run db:demo');
+      console.log(`   Zona "${ZONA}": ${d.sucursales.length} de ${d.sucursalesTotales} sucursales, ${d.presentaciones.length} presentaciones con precio (hasta ${d.fechaMax || '—'}).`);
+      if (!d.presentaciones.length) console.log('   No hay precios en la zona: carga los CSV limpios con 02_cargar.py (ver README).');
     } catch (e) {
       console.error('   ⚠', mensajeError(e));
     }
