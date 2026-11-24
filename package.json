@@ -1,0 +1,24 @@
+{
+  "name": "comparador-precios-sostenible-qro",
+  "version": "1.0.0",
+  "description": "CDPS Sostenible: comparador de precios de la canasta básica en Querétaro (datos QQP de PROFECO) con recomendaciones por precio, tiempo de traslado y huella de carbono.",
+  "main": "src/server.js",
+  "private": true,
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "db:init": "node scripts/init-db.js",
+    "db:demo": "node scripts/demo-data.js",
+    "importar": "node scripts/importar-qqp.js",
+    "test": "node --test \"test/*.test.js\""
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "dotenv": "16.4.5",
+    "express": "4.21.2",
+    "leaflet": "1.9.4",
+    "mysql2": "3.11.5"
+  }
+}

@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="es-MX">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>CDPS Sostenible · Canasta básica Querétaro</title>
+  <meta name="description" content="Encuentra dónde comprar tu canasta básica en Querétaro: más barato, más cerca y con menor huella de carbono. Datos de Quién es Quién en los Precios (PROFECO).">
+  <meta name="theme-color" content="#1f4a2e">
+  <link rel="icon" href="img/logo.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="css/estilos.css">
+</head>
+<body>
+  <header class="barra">
+    <a class="marca" href="#" aria-label="Inicio">
+      <img src="img/logo.png" alt="" width="44" height="44">
+      <span><b>CDPS</b> Sostenible<small>Comparador de precios · Querétaro</small></span>
+    </a>
+    <nav class="nav">
+      <button class="btn-fantasma" id="btnListas" type="button">📋 <span>Mis listas</span></button>
+      <button class="btn-fantasma" id="btnCuenta" type="button">👤 <span id="txtCuenta">Entrar</span></button>
+    </nav>
+  </header>
+
+  <div id="avisos"></div>
+
+  <main class="app">
+    <!-- ======================= PANEL IZQUIERDO ======================= -->
+    <section class="panel" aria-label="Arma tu búsqueda">
+      <div class="hero">
+        <h1>¿Dónde te sale más barata tu <em>canasta básica</em>?</h1>
+        <p>Compara precios reales de PROFECO en Querétaro y elige la mejor ruta según tu dinero, tu tiempo y el planeta.</p>
+      </div>
+
+      <!-- Paso 1 -->
+      <article class="paso" id="paso1">
+        <header><span class="num">1</span><h2>¿Desde dónde sales?</h2></header>
+        <div class="fila-ubicacion">
+          <button class="btn-sec" id="btnGPS" type="button">📍 Usar mi ubicación</button>
+          <select id="selMunicipio" aria-label="Municipio"></select>
+        </div>
+        <p class="pista" id="txtUbicacion">También puedes tocar el mapa o arrastrar el pin.</p>
+
+        <label class="etiqueta">¿Cómo te mueves?</label>
+        <div class="chips" id="transportes" role="radiogroup" aria-label="Medio de transporte"></div>
+
+        <label class="etiqueta" for="rngRadio">Buscar tiendas a <b id="txtRadio">8 km</b> o menos</label>
+        <input type="range" id="rngRadio" min="1" max="40" step="1" value="8">
+      </article>
+
+      <!-- Paso 2 -->
+      <article class="paso" id="paso2">
+        <header><span class="num">2</span><h2>Arma tu canasta</h2>
+          <button class="btn-link" id="btnRapida" type="button">⚡ Canasta típica</button>
+        </header>
+        <div class="buscador">
+          <input type="search" id="txtBuscar" placeholder="Busca: leche, huevo, tortilla, arroz…" autocomplete="off" aria-label="Buscar producto">
+          <div class="resultados" id="resultados" hidden></div>
+        </div>
+        <div class="categorias" id="categorias"></div>
+
+        <ul class="canasta" id="canasta" aria-live="polite"></ul>
+        <p class="vacio" id="canastaVacia">Tu canasta está vacía. Toca una categoría o busca un producto 👆</p>
+      </article>
+
+      <!-- Paso 3 -->
+      <article class="paso" id="paso3">
+        <header><span class="num">3</span><h2>¿Qué te importa más?</h2></header>
+        <div class="presets" id="presets" role="radiogroup" aria-label="Prioridad">
+          <button type="button" data-p="ahorro">💰<b>Ahorrar</b><small>el menor costo</small></button>
+          <button type="button" data-p="equilibrio">⚖️<b>Equilibrio</b><small>dinero y tiempo</small></button>
+          <button type="button" data-p="rapido">⚡<b>Rapidez</b><small>poco traslado</small></button>
+          <button type="button" data-p="eco">🌱<b>Planeta</b><small>menos CO₂</small></button>
+        </div>
+        <details class="avanzado">
+          <summary>Ajuste fino</summary>
+          <label class="etiqueta" for="rngTiempo">Tu tiempo vale <b id="txtTiempo">$60</b> por hora</label>
+          <input type="range" id="rngTiempo" min="0" max="300" step="10" value="60">
+          <label class="etiqueta" for="rngEco">Peso ambiental: <b id="txtEco">$0</b> por kg de CO₂</label>
+          <input type="range" id="rngEco" min="0" max="60" step="2" value="0">
+          <label class="etiqueta" for="selTiendas">Máximo de tiendas a visitar</label>
+          <select id="selTiendas"><option value="1">1 tienda</option><option value="2">Hasta 2</option><option value="3" selected>Hasta 3</option></select>
+        </details>
+      </article>
+
+      <div class="accion">
+        <button class="btn-primario" id="btnBuscar" type="button" disabled>
+          <span>Encontrar dónde comprar</span><small id="txtResumen">0 productos</small>
+        </button>
+      </div>
+    </section>
+
+    <!-- ======================= PANEL DERECHO ======================= -->
+    <section class="lienzo" aria-label="Resultados">
+      <div class="mapa-caja"><div id="mapa" role="application" aria-label="Mapa de tiendas"></div>
+        <div class="leyenda"><span><i class="pto yo"></i>Tú</span><span><i class="pto tienda"></i>Tienda</span><span><i class="pto ruta"></i>Tu ruta</span></div>
+      </div>
+      <div id="resultadosPlan">
+        <div class="bienvenida">
+          <img src="img/logo.png" alt="Logo CDPS Sostenible" width="160" height="160">
+          <h3>Tu recomendación aparecerá aquí</h3>
+          <ol>
+            <li>Dinos desde dónde sales y cómo te mueves.</li>
+            <li>Agrega los productos de tu canasta.</li>
+            <li>Te decimos dónde comprar: más barato, más rápido o más verde.</li>
+          </ol>
+          <p class="pista" id="txtDatos"></p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="pie">
+    <p>Datos: <a href="https://www.gob.mx/profeco" target="_blank" rel="noopener">Quién es Quién en los Precios · PROFECO</a>. Huella de productos: Poore &amp; Nemecek (2018). Tiempos y distancias son estimaciones.</p>
+  </footer>
+
+  <!-- Modal genérico -->
+  <dialog id="modal">
+    <form method="dialog" class="modal-cerrar"><button aria-label="Cerrar">✕</button></form>
+    <div id="modalCuerpo"></div>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="vendor/leaflet/leaflet.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
